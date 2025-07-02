@@ -9,6 +9,13 @@
 (define-constant ERR_ALREADY_VERIFIED (err u105))
 (define-constant ERR_NOT_VERIFIED (err u106))
 (define-constant ERR_INVALID_RECIPIENT (err u107))
+(define-constant ERR_PENDING_APPROVAL (err u108))
+(define-constant ERR_ALREADY_APPROVED (err u109))
+(define-constant ERR_NOT_AUTHORIZED_SIGNER (err u110))
+
+(define-data-var multisig-threshold uint u10000)
+(define-data-var required-signatures uint u2)
+(define-data-var next-proposal-id uint u1)
 
 (define-data-var total-refugees uint u0)
 (define-data-var total-aid-distributed uint u0)
@@ -262,3 +269,71 @@
     false
   )
 )
+
+(define-map authorized-signers principal bool)
+(define-map aid-proposals uint {
+  recipient: principal,
+  amount: uint,
+  purpose: (string-ascii 100),
+  proposer: principal,
+  approvals: uint,
+  executed: bool,
+  created-at: uint
+})
+(define-map proposal-approvals { proposal-id: uint, signer: principal } bool)
+
+(define-public (add-authorized-signer (signer principal))
+  (if (is-eq tx-sender CONTRACT_OWNER)
+    (begin
+      (map-set authorized-signers signer true)
+      (ok true))
+    ERR_UNAUTHORIZED))
+
+(define-public (propose-large-aid (recipient principal) (amount uint) (purpose (string-ascii 100)))
+  (if (and (>= amount (var-get multisig-threshold)) (default-to false (map-get? authorized-signers tx-sender)))
+    (let ((proposal-id (var-get next-proposal-id)))
+      (map-set aid-proposals proposal-id {
+        recipient: recipient,
+        amount: amount,
+        purpose: purpose,
+        proposer: tx-sender,
+        approvals: u0,
+        executed: false,
+        created-at: stacks-block-height
+      })
+      (var-set next-proposal-id (+ proposal-id u1))
+      (ok proposal-id))
+    ERR_UNAUTHORIZED))
+
+(define-public (approve-aid-proposal (proposal-id uint))
+  (let ((proposal (map-get? aid-proposals proposal-id))
+        (is-signer (default-to false (map-get? authorized-signers tx-sender)))
+        (already-approved (default-to false (map-get? proposal-approvals { proposal-id: proposal-id, signer: tx-sender }))))
+    (if (and (is-some proposal) is-signer (not already-approved))
+      (let ((proposal-data (unwrap-panic proposal)))
+        (if (not (get executed proposal-data))
+          (begin
+            (map-set proposal-approvals { proposal-id: proposal-id, signer: tx-sender } true)
+            (map-set aid-proposals proposal-id (merge proposal-data { approvals: (+ (get approvals proposal-data) u1) }))
+            (ok true))
+          ERR_UNAUTHORIZED))
+      ERR_ALREADY_APPROVED)))
+
+(define-public (execute-approved-proposal (proposal-id uint))
+  (let ((proposal (map-get? aid-proposals proposal-id)))
+    (if (is-some proposal)
+      (let ((proposal-data (unwrap-panic proposal)))
+        (if (and (>= (get approvals proposal-data) (var-get required-signatures)) (not (get executed proposal-data)))
+          (begin
+            (try! (distribute-aid (get recipient proposal-data) (get amount proposal-data) (get purpose proposal-data)))
+            (map-set aid-proposals proposal-id (merge proposal-data { executed: true }))
+            (ok true))
+          ERR_UNAUTHORIZED))
+      ERR_NOT_REGISTERED)))
+
+(define-read-only (get-proposal (proposal-id uint))
+  (map-get? aid-proposals proposal-id))
+
+(define-read-only (has-approved-proposal (proposal-id uint) (signer principal))
+  (default-to false (map-get? proposal-approvals { proposal-id: proposal-id, signer: signer })))
+
