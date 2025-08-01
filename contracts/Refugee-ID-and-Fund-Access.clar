@@ -13,6 +13,12 @@
 (define-constant ERR_ALREADY_APPROVED (err u109))
 (define-constant ERR_NOT_AUTHORIZED_SIGNER (err u110))
 
+(define-constant ERR_ALERT_NOT_FOUND (err u111))
+(define-constant ERR_INVALID_ALERT_TYPE (err u112))
+(define-constant ERR_ALERT_RESOLVED (err u113))
+
+(define-data-var next-alert-id uint u1)
+
 (define-data-var multisig-threshold uint u10000)
 (define-data-var required-signatures uint u2)
 (define-data-var next-proposal-id uint u1)
@@ -337,3 +343,118 @@
 (define-read-only (has-approved-proposal (proposal-id uint) (signer principal))
   (default-to false (map-get? proposal-approvals { proposal-id: proposal-id, signer: signer })))
 
+
+(define-map emergency-alerts
+  uint
+  {
+    reporter: principal,
+    alert-type: (string-ascii 20),
+    severity: uint,
+    location: (string-ascii 50),
+    description: (string-ascii 200),
+    timestamp: uint,
+    is-resolved: bool,
+    responder: (optional principal),
+    resolution-notes: (optional (string-ascii 100))
+  }
+)
+
+(define-map authorized-responders principal bool)
+
+(define-map alert-responses
+  { alert-id: uint, responder: principal }
+  {
+    response-time: uint,
+    action-taken: (string-ascii 150),
+    resources-provided: uint
+  }
+)
+
+(define-public (register-responder (responder principal))
+  (if (is-eq tx-sender CONTRACT_OWNER)
+    (begin
+      (map-set authorized-responders responder true)
+      (ok true)
+    )
+    ERR_UNAUTHORIZED
+  )
+)
+
+(define-public (broadcast-emergency 
+  (alert-type (string-ascii 20))
+  (severity uint)
+  (location (string-ascii 50))
+  (description (string-ascii 200))
+)
+  (let ((refugee-info (map-get? refugee-profiles tx-sender)))
+    (if (and (is-some refugee-info) (get is-verified (unwrap-panic refugee-info)))
+      (let ((alert-id (var-get next-alert-id)))
+        (map-set emergency-alerts alert-id {
+          reporter: tx-sender,
+          alert-type: alert-type,
+          severity: severity,
+          location: location,
+          description: description,
+          timestamp: stacks-block-height,
+          is-resolved: false,
+          responder: none,
+          resolution-notes: none
+        })
+        (var-set next-alert-id (+ alert-id u1))
+        (ok alert-id)
+      )
+      ERR_NOT_VERIFIED
+    )
+  )
+)
+
+(define-public (respond-to-alert 
+  (alert-id uint)
+  (action-taken (string-ascii 150))
+  (resources-provided uint)
+)
+  (let ((alert-info (map-get? emergency-alerts alert-id)))
+    (if (and (is-some alert-info) (default-to false (map-get? authorized-responders tx-sender)))
+      (let ((alert-data (unwrap-panic alert-info)))
+        (if (get is-resolved alert-data)
+          ERR_ALERT_RESOLVED
+          (begin
+            (map-set alert-responses { alert-id: alert-id, responder: tx-sender } {
+              response-time: stacks-block-height,
+              action-taken: action-taken,
+              resources-provided: resources-provided
+            })
+            (ok true)
+          )
+        )
+      )
+      ERR_UNAUTHORIZED
+    )
+  )
+)
+
+(define-public (resolve-alert (alert-id uint) (resolution-notes (string-ascii 100)))
+  (let ((alert-info (map-get? emergency-alerts alert-id)))
+    (if (and (is-some alert-info) (default-to false (map-get? authorized-responders tx-sender)))
+      (let ((alert-data (unwrap-panic alert-info)))
+        (map-set emergency-alerts alert-id 
+          (merge alert-data { 
+            is-resolved: true, 
+            responder: (some tx-sender),
+            resolution-notes: (some resolution-notes)
+          })
+        )
+        (ok true)
+      )
+      ERR_UNAUTHORIZED
+    )
+  )
+)
+
+(define-read-only (get-emergency-alert (alert-id uint))
+  (map-get? emergency-alerts alert-id)
+)
+
+(define-read-only (get-alert-response (alert-id uint) (responder principal))
+  (map-get? alert-responses { alert-id: alert-id, responder: responder })
+)
