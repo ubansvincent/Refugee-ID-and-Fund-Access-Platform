@@ -1,0 +1,33 @@
+[project]
+name = 'Refugee-ID-and-Fund-Access'
+description = ''
+authors = []
+telemetry = true
+cache_dir = '.\.cache'
+requirements = []
+[contracts.Refugee-ID-and-Fund-Access]
+path = 'contracts/Refugee-ID-and-Fund-Access.clar'
+clarity_version = 3
+epoch = 3.1
+
+[contracts.refugee-skill-registry]
+path = 'contracts/refugee-skill-registry.clar'
+clarity_version = 3
+epoch = 3.1
+
+[contracts.refugee-community-fundraising]
+path = 'contracts/refugee-community-fundraising.clar'
+clarity_version = 3
+epoch = 3.1
+[repl.analysis]
+passes = ['check_checker']
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
+
+[repl.remote_data]
+enabled = false
+api_url = 'https://api.hiro.so'
