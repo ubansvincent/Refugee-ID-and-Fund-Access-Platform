@@ -14,6 +14,11 @@ epoch = 3.1
 path = 'contracts/refugee-skill-registry.clar'
 clarity_version = 3
 epoch = 3.1
+
+[contracts.refugee-community-fundraising]
+path = 'contracts/refugee-community-fundraising.clar'
+clarity_version = 3
+epoch = 3.1
 [repl.analysis]
 passes = ['check_checker']
 
